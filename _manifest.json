@@ -1,0 +1,32 @@
+{
+  "manifest_version": 2,
+  "id": "ling.video-bot",
+  "version": "1.0.0",
+  "name": "视频解析Bot",
+  "description": "MaiBot plugin: auto-download Bilibili/Douyin videos & images, AI-powered commentary via Volcengine Vision",
+  "author": {
+    "name": "ling",
+    "url": "https://github.com/ling"
+  },
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/ling/video-bot"
+  },
+  "host_application": {
+    "min_version": "1.0.0",
+    "max_version": "1.99.99"
+  },
+  "sdk": {
+    "min_version": "2.0.0",
+    "max_version": "2.99.99"
+  },
+  "dependencies": [
+    {"type": "python_package", "name": "aiohttp", "version_spec": ">=3.0"},
+    {"type": "python_package", "name": "aiofiles", "version_spec": ">=25.1.0"},
+    {"type": "python_package", "name": "msgspec", "version_spec": ">=0.21.0"},
+    {"type": "python_package", "name": "bilibili-api-python", "version_spec": ">=17.4.1"},
+    {"type": "python_package", "name": "Pillow", "version_spec": ">=10.0"}
+  ],
+  "capabilities": ["send.text", "send.custom", "config.get"],
+  "i18n": {"default_locale": "zh-CN"}
+}
