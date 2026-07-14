@@ -30,7 +30,7 @@ ContentType = Literal["video", "image", "text"]
 
 # 火山方舟
 VOLC_BASE = "https://ark.cn-beijing.volces.com/api/v3"
-VOLC_KEY = "your-volcengine-api-key-here"
+VOLC_KEY = ""  # set in config.toml [volcengine].api_key
 VISION_MODEL = "doubao-seed-2-0-pro-260215"
 TEXT_MODEL = "doubao-seed-2-1-turbo-260628"
 
@@ -81,11 +81,16 @@ class ApiSectionConfig(PluginConfigBase):
     bot_uin: str = Field(default="")
 
 
+class VolcengineSectionConfig(PluginConfigBase):
+    api_key: str = Field(default="your-v…here")
+
+
 class PluginConfig(PluginConfigBase):
     plugin: PluginSectionConfig = Field(default_factory=PluginSectionConfig)
     parser: ParserSectionConfig = Field(default_factory=ParserSectionConfig)
     cookies: CookiesSectionConfig = Field(default_factory=CookiesSectionConfig)
     api: ApiSectionConfig = Field(default_factory=ApiSectionConfig)
+    volcengine: VolcengineSectionConfig = Field(default_factory=VolcengineSectionConfig)
 
 
 # ═══════════════════════════════════════════════════════
@@ -981,7 +986,7 @@ class VideoBotPlugin(MaiBotPlugin):
             async with aiohttp.ClientSession() as s:
                 async with s.post(
                     f"{VOLC_BASE}/chat/completions",
-                    headers={"Authorization": f"Bearer {VOLC_KEY}"},
+                    headers={"Authorization": f"Bearer {self.config.volcengine.api_key}"},
                     json={"model": VISION_MODEL, "messages": [{"role": "user", "content": content}],
                           "max_tokens": 300, "temperature": 0.3},
                     timeout=120,
@@ -1006,7 +1011,7 @@ class VideoBotPlugin(MaiBotPlugin):
             async with aiohttp.ClientSession() as s:
                 async with s.post(
                     f"{VOLC_BASE}/chat/completions",
-                    headers={"Authorization": f"Bearer {VOLC_KEY}"},
+                    headers={"Authorization": f"Bearer {self.config.volcengine.api_key}"},
                     json={"model": TEXT_MODEL, "messages": [{"role": "user", "content": prompt}],
                           "max_tokens": 300, "temperature": 0.8},
                     timeout=60,
@@ -1037,7 +1042,7 @@ class VideoBotPlugin(MaiBotPlugin):
             async with aiohttp.ClientSession() as s:
                 async with s.post(
                     f"{VOLC_BASE}/chat/completions",
-                    headers={"Authorization": f"Bearer {VOLC_KEY}"},
+                    headers={"Authorization": f"Bearer {self.config.volcengine.api_key}"},
                     json={"model": VISION_MODEL, "messages": [{"role": "user", "content": content}],
                           "max_tokens": 200, "temperature": 0.3},
                     timeout=120,
@@ -1063,7 +1068,7 @@ class VideoBotPlugin(MaiBotPlugin):
             async with aiohttp.ClientSession() as s:
                 async with s.post(
                     f"{VOLC_BASE}/chat/completions",
-                    headers={"Authorization": f"Bearer {VOLC_KEY}"},
+                    headers={"Authorization": f"Bearer {self.config.volcengine.api_key}"},
                     json={"model": TEXT_MODEL, "messages": [{"role": "user", "content": prompt}],
                           "max_tokens": 300, "temperature": 0.8},
                     timeout=60,
