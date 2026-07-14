@@ -34,9 +34,6 @@ VOLC_KEY = ""  # set in config.toml [volcengine].api_key
 VISION_MODEL = "doubao-seed-2-0-pro-260215"
 TEXT_MODEL = "doubao-seed-2-1-turbo-260628"
 
-FALLBACK_PERSONA = """你是"玲宝"，一个真实的女大学生。说话简洁直接、逻辑清晰、幽默在线，
-中文互联网口语风格，自然随意。现在群友分享了一个内容，请你用自然的口吻点评。"""
-
 
 # ═══════════════════════════════════════════════════════
 # 配置
@@ -997,6 +994,8 @@ class VideoBotPlugin(MaiBotPlugin):
         if video_analysis:
             ctx += f"\n视频内容识别：{video_analysis}"
         prompt = await self._build_comment_prompt(ctx)
+        if not prompt:
+            return ""
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.post(
@@ -1054,6 +1053,8 @@ class VideoBotPlugin(MaiBotPlugin):
             ctx += f"\n图片内容：{img_analysis}"
         ctx += "\n\n（B站/抖音可以自己看原图，所以你只需点评内容，不需要描述图片细节给别人看）"
         prompt = await self._build_comment_prompt(ctx)
+        if not prompt:
+            return ""
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.post(
@@ -1076,7 +1077,7 @@ class VideoBotPlugin(MaiBotPlugin):
         self._ffmpeg_exe = ffmpeg or ""
         return ffmpeg
 
-    async def _build_comment_prompt(self, context: str) -> str:
+    async def _build_comment_prompt(self, context: str) -> str | None:
         """读取 MaiBot 人设配置，拼接点评提示词。"""
         try:
             persona = await self.ctx.call_capability("config.get", key="personality.personality", default="")
@@ -1086,7 +1087,7 @@ class VideoBotPlugin(MaiBotPlugin):
                 return f"{p}\n\n{context}\n\n请用你的人设风格发表一段点评（简短自然，像真人聊天）："
         except Exception:
             pass
-        return f"{FALLBACK_PERSONA}\n\n{context}\n\n请用你的风格发表一段点评（简短自然，像真人聊天）："
+        return None
 
     async def _compress_video(self, input_path: Path, max_mb: int) -> Path | None:
         ffmpeg = await self._get_ffmpeg()
