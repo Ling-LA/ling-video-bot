@@ -30,7 +30,6 @@ ContentType = Literal["video", "image", "text"]
 
 # 火山方舟
 VOLC_BASE = "https://ark.cn-beijing.volces.com/api/v3"
-VOLC_KEY = ""  # set in config.toml [volcengine].api_key
 VISION_MODEL = "doubao-seed-2-0-pro-260215"
 TEXT_MODEL = "doubao-seed-2-1-turbo-260628"
 
@@ -115,31 +114,6 @@ async def send_video_to_group(group_id: str, path: Path, api: ApiSectionConfig) 
     return await _send_group_msg(group_id, [{"type": "video", "data": {"file": _file_uri(path)}}], api, timeout=300)
 
 
-async def send_image_to_group(group_id: str, path: Path, api: ApiSectionConfig) -> bool:
-    return await _send_group_msg(group_id, [{"type": "image", "data": {"file": _file_uri(path)}}], api, timeout=120)
-
-
-async def send_forward_to_group(
-    group_id: str, nodes: list[list[dict]], sender_name: str, api: ApiSectionConfig
-) -> bool:
-    """发送合并转发消息。每个 node 是一条消息，可以包含图/文。"""
-    forward_nodes = [
-        {
-            "type": "node",
-            "data": {
-                "name": sender_name,
-                "uin": api.bot_uin or "10000",
-                "content": node,
-            },
-        }
-        for node in nodes
-    ]
-    return await _post_onebot(
-        f"http://{api.host}:{api.port}/send_group_forward_msg",
-        {"group_id": group_id, "messages": forward_nodes},
-        api,
-        timeout=120,
-    )
 
 
 # ═══════════════════════════════════════════════════════
@@ -894,37 +868,6 @@ class VideoBotPlugin(MaiBotPlugin):
         await send_video_to_group(group_id, video_path, api)
         return str(video_path), content, author, extra
 
-    async def _download_and_send_images_sync(
-        self, group_id: str, platform: str, url: str, api
-    ) -> None:
-        """同步下载+发送图片。"""
-        cookies = self.config.cookies.bilibili if platform == "bilibili" else self.config.cookies.douyin
-        if platform == "bilibili":
-            result = await _download_bilibili_images(url, cookies)
-        elif platform == "douyin":
-            result = await _download_douyin_images(url, cookies)
-        else:
-            return
-
-        if not result or not result[0]:
-            return
-
-        paths, desc, author = result
-        paths = paths[:self.config.parser.max_image_count]
-
-        if len(paths) == 1:
-            await send_image_to_group(group_id, paths[0], api)
-        else:
-            sender_name = author or ("B站" if platform == "bilibili" else "抖音")
-            nodes = []
-            for i, path in enumerate(paths):
-                node = [{"type": "image", "data": {"file": _file_uri(path)}}]
-                if i == 0 and desc:
-                    node.insert(0, {"type": "text", "data": {"text": desc[:100]}})
-                nodes.append(node)
-            await send_forward_to_group(group_id, nodes, sender_name, api)
-
-    async def _extract_frames(self, video_path: Path, count: int = 3) -> list[bytes]:
         """提取视频关键帧，返回 JPEG 字节列表。"""
         ffmpeg = await self._get_ffmpeg()
         if not ffmpeg:
