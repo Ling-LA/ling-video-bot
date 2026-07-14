@@ -868,6 +868,7 @@ class VideoBotPlugin(MaiBotPlugin):
         await send_video_to_group(group_id, video_path, api)
         return str(video_path), content, author, extra
 
+    async def _extract_frames(self, video_path: Path, count: int = 3) -> list[bytes]:
         """提取视频关键帧，返回 JPEG 字节列表。"""
         ffmpeg = await self._get_ffmpeg()
         if not ffmpeg:
