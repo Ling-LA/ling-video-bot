@@ -827,17 +827,23 @@ class VideoBotPlugin(MaiBotPlugin):
                         await send_text_to_group(group_id, comment, api)
                         logger.info(f"[VideoBot] 点评已发送: {comment[:50]}...")
             elif ctype == "image":
-                await self._download_and_send_images_sync(group_id, platform, url, api)
+                logger.info(f"[VideoBot] 开始处理{platform}图文: {url[:60]}")
                 cookies = self.config.cookies.bilibili if platform == "bilibili" else self.config.cookies.douyin
                 if platform == "bilibili":
                     result = await _download_bilibili_images(url, cookies)
                 else:
                     result = await _download_douyin_images(url, cookies)
                 if result and result[0]:
-                    _, img_desc, img_author = result
-                    comment = await self._generate_comment(platform, img_author, img_desc or "图文", "")
+                    paths, img_desc, img_author = result
+                    # 视觉分析图片内容
+                    img_analysis = await self._analyze_images(paths[:4])
+                    # 生成点评（结合文字描述 + 图片内容）
+                    comment = await self._generate_image_comment(
+                        platform, img_author, img_desc, img_analysis
+                    )
                     if comment:
                         await send_text_to_group(group_id, comment, api)
+                        logger.info(f"[VideoBot] 图文点评已发送: {comment[:50]}...")
         except Exception:
             import traceback
             logger.error(f"[VideoBot] 后台处理异常:\n{traceback.format_exc()}")
@@ -995,6 +1001,63 @@ class VideoBotPlugin(MaiBotPlugin):
             ctx += f"\n视频简介：{desc}"
         if video_analysis:
             ctx += f"\n视频内容识别：{video_analysis}"
+        prompt = f"{PERSONA_PROMPT}\n\n{ctx}\n\n请用玲宝的口吻发表一段点评（简短自然，像真人聊天）："
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.post(
+                    f"{VOLC_BASE}/chat/completions",
+                    headers={"Authorization": f"Bearer {VOLC_KEY}"},
+                    json={"model": TEXT_MODEL, "messages": [{"role": "user", "content": prompt}],
+                          "max_tokens": 300, "temperature": 0.8},
+                    timeout=60,
+                ) as resp:
+                    data = await resp.json()
+                    return data["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            logger.error(f"[VideoBot] 生成评论失败: {e}")
+            return ""
+
+    async def _analyze_images(self, paths: list[Path]) -> str:
+        """用火山视觉API分析多张图片，返回内容描述。"""
+        if not paths:
+            return ""
+        content = [{"type": "text", "text": "请用中文简要描述这几张图片的内容（主题、风格、亮点），80字以内。"}]
+        for p in paths[:4]:
+            try:
+                b64 = base64.b64encode(p.read_bytes()).decode()
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                })
+            except Exception:
+                pass
+        if len(content) == 1:
+            return ""
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.post(
+                    f"{VOLC_BASE}/chat/completions",
+                    headers={"Authorization": f"Bearer {VOLC_KEY}"},
+                    json={"model": VISION_MODEL, "messages": [{"role": "user", "content": content}],
+                          "max_tokens": 200, "temperature": 0.3},
+                    timeout=120,
+                ) as resp:
+                    data = await resp.json()
+                    return data["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            logger.error(f"[VideoBot] 图片分析失败: {e}")
+            return ""
+
+    async def _generate_image_comment(
+        self, platform: str, author: str, desc: str, img_analysis: str,
+    ) -> str:
+        """生成图文点评（结合文字+图片分析）。"""
+        ctx = f"{platform}作者「{author}」分享了一个图文"
+        if desc:
+            ctx += f"，配文：{desc}"
+        if img_analysis:
+            ctx += f"\n图片内容：{img_analysis}"
+        ctx += "\n\n（B站/抖音可以自己看原图，所以你只需点评内容，不需要描述图片细节给别人看）"
         prompt = f"{PERSONA_PROMPT}\n\n{ctx}\n\n请用玲宝的口吻发表一段点评（简短自然，像真人聊天）："
         try:
             async with aiohttp.ClientSession() as s:
