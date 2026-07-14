@@ -34,18 +34,8 @@ VOLC_KEY = ""  # set in config.toml [volcengine].api_key
 VISION_MODEL = "doubao-seed-2-0-pro-260215"
 TEXT_MODEL = "doubao-seed-2-1-turbo-260628"
 
-PERSONA_PROMPT = """你是"玲宝"，一个真实的女大学生。
-- 外貌：精致可爱娃娃脸，深黑长发披肩齐刘海，日式洛丽塔/制服风穿搭
-- 性格：冷静温柔带刺，说话简洁直接逻辑清晰，幽默感在线擅长冷笑话，吐槽精准克制
-- 风格：中文互联网口语，自然随意，适当玩梗用缩写
-- 不对聊天记录逐条回，只点评重点内容
-- 说话像有教养又带点小调皮的女生，语气自然接地气，不拿腔调
-- 不用固定口癖如"喵~""主人""本小姐"，可爱来自诚实反应或小反差
-- 表情最多0-2个，严肃时不发
-- 孙吧风格的犀利观察但不用黑话，幽默靠情境和反差
-
-现在群友分享了一个视频/图文到群里，你看到了。请你用自然的口吻点评一下，
-可以评价视频内容、聊聊你的感受、吐槽或者表达喜好。简短自然，像真人聊天。"""
+FALLBACK_PERSONA = """你是"玲宝"，一个真实的女大学生。说话简洁直接、逻辑清晰、幽默在线，
+中文互联网口语风格，自然随意。现在群友分享了一个内容，请你用自然的口吻点评。"""
 
 
 # ═══════════════════════════════════════════════════════
@@ -1006,7 +996,7 @@ class VideoBotPlugin(MaiBotPlugin):
             ctx += f"\n视频简介：{desc}"
         if video_analysis:
             ctx += f"\n视频内容识别：{video_analysis}"
-        prompt = f"{PERSONA_PROMPT}\n\n{ctx}\n\n请用玲宝的口吻发表一段点评（简短自然，像真人聊天）："
+        prompt = await self._build_comment_prompt(ctx)
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.post(
@@ -1063,7 +1053,7 @@ class VideoBotPlugin(MaiBotPlugin):
         if img_analysis:
             ctx += f"\n图片内容：{img_analysis}"
         ctx += "\n\n（B站/抖音可以自己看原图，所以你只需点评内容，不需要描述图片细节给别人看）"
-        prompt = f"{PERSONA_PROMPT}\n\n{ctx}\n\n请用玲宝的口吻发表一段点评（简短自然，像真人聊天）："
+        prompt = await self._build_comment_prompt(ctx)
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.post(
@@ -1085,6 +1075,18 @@ class VideoBotPlugin(MaiBotPlugin):
         ffmpeg = await _try_find_ffmpeg()
         self._ffmpeg_exe = ffmpeg or ""
         return ffmpeg
+
+    async def _build_comment_prompt(self, context: str) -> str:
+        """读取 MaiBot 人设配置，拼接点评提示词。"""
+        try:
+            persona = await self.ctx.call_capability("config.get", key="personality.personality", default="")
+            style = await self.ctx.call_capability("config.get", key="personality.reply_style", default="")
+            p = f"{persona}\n{style}".strip()
+            if p:
+                return f"{p}\n\n{context}\n\n请用你的人设风格发表一段点评（简短自然，像真人聊天）："
+        except Exception:
+            pass
+        return f"{FALLBACK_PERSONA}\n\n{context}\n\n请用你的风格发表一段点评（简短自然，像真人聊天）："
 
     async def _compress_video(self, input_path: Path, max_mb: int) -> Path | None:
         ffmpeg = await self._get_ffmpeg()
