@@ -939,6 +939,7 @@ class VideoBotPlugin(MaiBotPlugin):
             ctx += f"\n视频内容识别：{video_analysis}"
         prompt = await self._build_comment_prompt(ctx)
         if not prompt:
+            logger.warning("[VideoBot] 跳过视频点评：未获取到人设配置")
             return ""
         try:
             async with aiohttp.ClientSession() as s:
@@ -998,6 +999,7 @@ class VideoBotPlugin(MaiBotPlugin):
         ctx += "\n\n（B站/抖音可以自己看原图，所以你只需点评内容，不需要描述图片细节给别人看）"
         prompt = await self._build_comment_prompt(ctx)
         if not prompt:
+            logger.warning("[VideoBot] 跳过图文点评：未获取到人设配置")
             return ""
         try:
             async with aiohttp.ClientSession() as s:
@@ -1024,13 +1026,16 @@ class VideoBotPlugin(MaiBotPlugin):
     async def _build_comment_prompt(self, context: str) -> str | None:
         """读取 MaiBot 人设配置，拼接点评提示词。"""
         try:
-            persona = await self.ctx.call_capability("config.get", key="personality.personality", default="")
-            style = await self.ctx.call_capability("config.get", key="personality.reply_style", default="")
-            p = f"{persona}\n{style}".strip()
+            persona = await self.ctx.config.get("personality.personality", default="")
+            style = await self.ctx.config.get("personality.reply_style", default="")
+            p = f"{persona or ''}\n{style or ''}".strip()
             if p:
                 return f"{p}\n\n{context}\n\n请用你的人设风格发表一段点评（简短自然，像真人聊天）："
-        except Exception:
-            pass
+            else:
+                logger.warning("[VideoBot] 未读取到人设配置，persona=%s style=%s",
+                               repr(persona)[:50], repr(style)[:50])
+        except Exception as e:
+            logger.error(f"[VideoBot] 读取人设配置失败: {e}")
         return None
 
     async def _compress_video(self, input_path: Path, max_mb: int) -> Path | None:
