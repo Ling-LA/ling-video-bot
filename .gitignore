@@ -1,9 +1,6 @@
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+config.toml
+config.toml.*.bak
 config_back/
-cache/
-*.mp4
-*.m4s
-*.jpg
-*.jpeg
-data/

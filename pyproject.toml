@@ -1,0 +1,19 @@
+[project]
+name = "ling-video-bot"
+version = "2.0.6"
+description = "MaiBot 的抖音和 B站视频、图文分享解析插件"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Ling-LA" }]
+dependencies = [
+    "aiofiles>=25.1.0",
+    "aiohttp>=3.0",
+    "bilibili-api-python>=17.4.1",
+    "curl-cffi>=0.15.0",
+    "yt-dlp>=2026.3.17",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120

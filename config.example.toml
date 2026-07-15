@@ -1,0 +1,40 @@
+[plugin]
+name = "ling_video-bot"
+config_version = "2.0.6"
+enabled = true
+
+[parser]
+enabled_platforms = ["bilibili", "douyin"]
+group_whitelist = []
+block_ai_reply = false
+debounce_seconds = 120
+max_video_size_mb = 80
+max_image_count = 9
+# 留空时从 PATH 查找 FFmpeg。
+ffmpeg_path = ""
+
+[cache]
+# 缓存超过保留时间或容量上限时自动删除最旧文件。
+max_size_mb = 2048
+retention_hours = 72
+cleanup_interval_minutes = 30
+
+[cookies]
+bilibili = ""
+# 抖音出现验证页或下载失败时，从浏览器开发者工具复制 www.douyin.com 请求的完整 Cookie。
+douyin = ""
+
+[api]
+# NapCat/OneBot HTTP API。大型视频通过本地 file URI 发送，避免 Base64 占用大量内存。
+host = "127.0.0.1"
+port = 3010
+token = ""
+timeout = 300
+
+[volcengine]
+enabled = false
+api_key = ""
+base_url = "https://ark.cn-beijing.volces.com/api/v3"
+vision_model = "doubao-seed-2-0-pro-260215"
+text_model = "doubao-seed-2-1-turbo-260628"
+timeout = 120

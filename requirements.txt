@@ -1,0 +1,5 @@
+aiofiles>=25.1.0
+aiohttp>=3.0
+bilibili-api-python>=17.4.1
+curl-cffi>=0.15.0
+yt-dlp>=2026.3.17

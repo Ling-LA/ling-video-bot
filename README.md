@@ -1,74 +1,45 @@
 # ling-video-bot
 
-MaiBot 插件 — QQ 群内自动识别 B站/抖音分享链接（含小程序卡片），下载高清视频，AI 视觉分析 + 人设风格点评。
+MaiBot 的抖音、B站分享链接解析插件。视频内容会下载并通过本地 OneBot 接口发送；图文和纯图片内容不会重复发送原图，仅结合链接内容生成点评。
 
 ## 功能
 
-- 🔗 识别 B站/抖音链接（短链、完整链接、分享口令）
-- 🃏 识别小程序卡片（QQ 分享卡片中的 B站/抖音链接）
-- 📹 B站视频：下载 1080P 原画质（视频+音频自动合并）
-- 🎵 抖音视频：短链解析 + 双跳转支持 + 去水印下载
-- 🤖 AI 点评：视频抽帧 → 火山方舟视觉模型分析 → 人设风格点评
-- 🖼️ 图文：视觉模型分析图片内容 + 配文 → 智能点评
-- 📝 纯文字：抓取文本注入消息 → Planner 自然回复
-- 🗜️ 视频压缩：超过 80MB 自动单次压缩（按比例选 CRF，veryfast 预设）
-- ⚡ 防重复：同群同链接 2 分钟内不重复处理
+- 识别普通链接、短链和常见分享卡片。
+- 下载并发送 B站、抖音原视频；80 MB 内原文件直发，超过后按源文件体积阶梯只压缩一次。
+- 对视频抽帧，对图文下载图片用于视觉分析，再结合 MaiBot 人设生成点评。
+- 文本内容安全注入 MaiBot Planner，并保留后续消息链路。
+- 支持群白名单、去重、下载体积限制和配置热重载。
+- 流式下载、原子缓存、同链接并发锁与自动缓存清理。
+- 同一 BV/作品正在处理时会明确忽略重复请求；已有有效压缩文件时直接复用，避免重复编码。
 
+## 环境要求
 
-## 架构
-
-```
-QQ 消息 → MaiBot 插件钩子（阻塞 <1s）
-  ├─ 纯文字：抓取内容 → 注入消息 → 交给 Planner
-  └─ 视频/图文：立即 abort → 后台异步任务
-       ├─ 下载 → 压缩(如需) → 发送(仅视频)
-       ├─ 视觉 API：doubao-seed-2-0-pro-260215
-       └─ 文本 LLM：doubao-seed-2-1-turbo-260628 → 发送点评
-```
-
-AI 点评人设**自动读取** MaiBot 宿主配置（`bot_config.toml` 的 `[personality]`），无需在插件内写死。
-
-## 依赖
-
-- MaiBot（需启用插件运行时）
-- ffmpeg（视频处理和抽帧）
-- 火山方舟 API（视觉 + 文本模型）
-- B站 SESSDATA Cookie（1080P 下载需要）
-- Python 包：`aiohttp` `aiofiles` `bilibili-api-python` `Pillow`
+- MaiBot 1.x、MaiBot Plugin SDK 2.x
+- Python 3.10 或更高版本
+- FFmpeg
+- NapCat 或兼容 OneBot 11 的本地 HTTP API
+- yt-dlp（用于兼容抖音新版页面）
+- 火山方舟 API Key（如需视觉识别和自动点评）
 
 ## 安装
 
-```bash
-# 复制到 MaiBot 插件目录
-cp -r ling-video-bot/ E:\bot\1.0\MaiBot\plugins\ling-video-bot
+将插件放入 `MaiBot/plugins/ling_video-bot`，复制 `config.example.toml` 为 `config.toml` 并填写必要配置。实际配置、Cookie 和 API Key 不应提交到 Git。
 
-# 安装依赖
-pip install aiohttp aiofiles bilibili-api-python Pillow
-```
+## 关键配置
 
-## 配置
+- `parser.max_video_size_mb`：原视频免压缩直发阈值，也是压缩阶梯的计算基准。
+- `cache.max_size_mb`、`cache.retention_hours`：缓存容量和保留期限。
+- `api.*`：OneBot HTTP 地址、Token 和发送超时。
+- `cookies.douyin`：抖音返回验证页时必填；复制浏览器访问 `www.douyin.com` 请求中的完整 Cookie。
+- `volcengine.*`：视觉与文本模型配置；关闭 `enabled` 可禁用外部 AI 分析。
 
-编辑 `config.toml`：
+## 设计说明
 
-```toml
-[cookies]
-bilibili = "你的-SESSDATA-cookie"   # B站 1080P 下载必填
-douyin = ""                        # 抖音 Cookie（可选）
+- 图文或纯图片分享可从原链接查看、下载，因此插件只生成点评，不重复发送原图。
+- 单文件下载安全上限与 `cache.max_size_mb` 一致，避免独立的旧下载限制在压缩前误拦截大视频。
+- 视频不设时长限制。以默认 80 MB 阈值为例，源文件在 80–<160、160–<320、320–<800、800 MB 以上时，分别使用 CRF 26、30、34、38。
+- 每个视频最多编码一次，压缩后不再按大小触发二次编码，以控制 CPU 占用和响应时间并兼顾画质。
 
-[parser]
-max_video_size_mb = 80             # 超过此大小自动压缩
-debounce_seconds = 120             # 同链接冷却时间
+## 许可证
 
-[api]
-host = "127.0.0.1"                 # OneBot HTTP 地址
-port = 3010
-
-[volcengine]
-api_key = "你的-火山方舟-API-Key"   # 视觉分析 + 点评生成
-```
-
-然后在 MaiBot 中启用插件，重启即可。
-
-## 许可
-
-MIT
+[MIT](LICENSE)
