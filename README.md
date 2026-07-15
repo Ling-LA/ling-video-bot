@@ -1,16 +1,23 @@
 # ling-video-bot
 
-MaiBot 的抖音、B站分享链接解析插件。视频内容会下载并通过本地 OneBot 接口发送；图文和纯图片内容不会重复发送原图，仅结合链接内容生成点评。
+MaiBot 的抖音、B站分享链接解析插件。插件会下载并发送视频，结合视频关键帧或图文内容生成符合 MaiBot 人设的点评。
 
 ## 功能
 
 - 识别普通链接、短链和常见分享卡片。
 - 下载并发送 B站、抖音原视频；80 MB 内原文件直发，超过后按源文件体积阶梯只压缩一次。
 - 对视频抽帧，对图文下载图片用于视觉分析，再结合 MaiBot 人设生成点评。
+- 图文和纯图片内容只生成点评，不重复发送原图；用户可直接从分享链接查看和下载图片。
 - 文本内容安全注入 MaiBot Planner，并保留后续消息链路。
 - 支持群白名单、去重、下载体积限制和配置热重载。
 - 流式下载、原子缓存、同链接并发锁与自动缓存清理。
 - 同一 BV/作品正在处理时会明确忽略重复请求；已有有效压缩文件时直接复用，避免重复编码。
+
+## 视频发送方式
+
+视频通过 OneBot 11 的本地 `file:///...` URI 发送，插件不会把完整视频读入内存并转换为 Base64。这样可显著降低大型视频发送时的内存占用。
+
+此方式要求 MaiBot 与 NapCat/OneBot 运行在同一台设备上，并且 OneBot 进程能够访问插件缓存文件的实际路径。如果二者运行在不同主机或隔离的容器中，需要为缓存目录配置共享卷和一致的路径映射；否则 OneBot 会因为找不到本地文件而发送失败。
 
 ## 环境要求
 
@@ -18,20 +25,68 @@ MaiBot 的抖音、B站分享链接解析插件。视频内容会下载并通过
 - Python 3.10 或更高版本
 - FFmpeg
 - NapCat 或兼容 OneBot 11 的本地 HTTP API
-- yt-dlp（用于兼容抖音新版页面）
-- 火山方舟 API Key（如需视觉识别和自动点评）
+- 火山方舟 API Key（仅在启用视觉识别和自动点评时需要）
+
+FFmpeg 用于合并 B站的音视频流、对超过免压缩阈值的视频进行一次阶梯压缩，以及提取关键帧。抖音新版页面的兼容解析由 `yt-dlp` 完成，Python 依赖会按插件清单安装。
 
 ## 安装
 
-将插件放入 `MaiBot/plugins/ling_video-bot`，复制 `config.example.toml` 为 `config.toml` 并填写必要配置。实际配置、Cookie 和 API Key 不应提交到 Git。
+1. 将仓库克隆或解压到 `MaiBot/plugins/ling_video-bot`。
+2. 将 `config.example.toml` 复制为 `config.toml`。
+3. 填写 OneBot 地址、Token，以及按需填写 Cookie 和火山方舟 API Key。
+4. 确认 `ffmpeg` 已加入系统 `PATH`，或在 `parser.ffmpeg_path` 中填写可执行文件路径。
+5. 启动或重启 MaiBot，观察日志确认插件已加载。
 
-## 关键配置
+实际配置、Cookie 和 API Key 不应提交到 Git；仓库中的 `.gitignore` 已排除 `config.toml`。
 
-- `parser.max_video_size_mb`：原视频免压缩直发阈值，也是压缩阶梯的计算基准。
-- `cache.max_size_mb`、`cache.retention_hours`：缓存容量和保留期限。
-- `api.*`：OneBot HTTP 地址、Token 和发送超时。
-- `cookies.douyin`：抖音返回验证页时必填；复制浏览器访问 `www.douyin.com` 请求中的完整 Cookie。
-- `volcengine.*`：视觉与文本模型配置；关闭 `enabled` 可禁用外部 AI 分析。
+## 使用方法
+
+在已允许的群聊中发送 B站或抖音分享链接即可。插件检测链接后会在后台下载内容：
+
+- 视频不超过 `parser.max_video_size_mb` 时发送原文件。
+- 视频超过该阈值时，根据源文件大小选择一个压缩阶梯并仅编码一次，然后发送压缩结果。
+- 图文或纯图片作品不会重新发送原图，只把内容交给 MaiBot 生成点评。
+- `volcengine.enabled = false` 时关闭外部视觉识别和自动点评，但不影响链接解析与视频发送。
+
+## 配置说明
+
+### `plugin`
+
+- `enabled`：启用或停用插件。
+
+### `parser`
+
+- `enabled_platforms`：允许解析的平台，可选 `bilibili`、`douyin`。
+- `group_whitelist`：允许使用插件的群号列表；留空表示不限制群聊。
+- `block_ai_reply`：是否阻止 MaiBot 对原始分享消息产生额外回复。
+- `debounce_seconds`：相同作品的重复触发间隔。
+- `max_video_size_mb`：原视频免压缩直发阈值，也是压缩阶梯的计算基准。
+- `max_image_count`：图文作品最多用于视觉分析的图片数量。
+- `ffmpeg_path`：FFmpeg 可执行文件路径；留空时从系统 `PATH` 查找。
+
+### `cache`
+
+- `max_size_mb`：缓存容量上限，同时作为单个下载内容的安全上限。该值应大于计划处理的最大源视频。
+- `retention_hours`：缓存文件保留时间。
+- `cleanup_interval_minutes`：缓存清理间隔。
+
+### `cookies`
+
+- `bilibili`：可选的 B站 Cookie。
+- `douyin`：抖音出现验证页或下载失败时填写浏览器访问 `www.douyin.com` 请求中的完整 Cookie。
+
+### `api`
+
+- `host`、`port`：NapCat/OneBot HTTP API 地址。
+- `token`：OneBot API 访问令牌。
+- `timeout`：大型视频发送的等待超时秒数。
+
+### `volcengine`
+
+- `enabled`：是否启用视觉识别和自动点评。
+- `api_key`、`base_url`：火山方舟鉴权和 API 地址。
+- `vision_model`、`text_model`：视觉与文本模型名称。
+- `timeout`：模型请求超时秒数。
 
 ## 设计说明
 
@@ -39,6 +94,20 @@ MaiBot 的抖音、B站分享链接解析插件。视频内容会下载并通过
 - 单文件下载安全上限与 `cache.max_size_mb` 一致，避免独立的旧下载限制在压缩前误拦截大视频。
 - 视频不设时长限制。以默认 80 MB 阈值为例，源文件在 80–<160、160–<320、320–<800、800 MB 以上时，分别使用 CRF 26、30、34、38。
 - 每个视频最多编码一次，压缩后不再按大小触发二次编码，以控制 CPU 占用和响应时间并兼顾画质。
+
+## 常见问题
+
+### 日志显示发送成功，但群里没有视频
+
+检查 MaiBot 与 NapCat/OneBot 是否位于同一台设备，以及 OneBot 进程是否能访问日志中对应的缓存路径。容器部署需要将缓存目录映射到双方可见的相同路径。
+
+### 抖音解析或下载失败
+
+先在浏览器中正常打开抖音，从开发者工具的网络请求中复制 `www.douyin.com` 请求携带的完整 Cookie，并写入 `cookies.douyin`。Cookie 属于敏感凭据，请勿上传到仓库或公开日志。
+
+### 大视频在下载阶段被拒绝
+
+增大 `cache.max_size_mb`。该配置既限制缓存总容量，也限制单个源文件的最大下载体积；压缩阈值由 `parser.max_video_size_mb` 单独控制。
 
 ## 许可证
 

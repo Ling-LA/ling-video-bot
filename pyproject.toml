@@ -1,6 +1,6 @@
 [project]
 name = "ling-video-bot"
-version = "2.0.6"
+version = "2.0.7"
 description = "MaiBot 的抖音和 B站视频、图文分享解析插件"
 readme = "README.md"
 requires-python = ">=3.10"

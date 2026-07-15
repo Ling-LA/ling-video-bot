@@ -41,7 +41,7 @@ ContentType = Literal["video", "image", "text"]
 
 class PluginSectionConfig(PluginConfigBase):
     name: str = Field(default="ling_video-bot")
-    config_version: str = Field(default="2.0.6")
+    config_version: str = Field(default="2.0.7")
     enabled: bool = Field(default=True)
 
 
