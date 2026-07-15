@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "github.ling-la.ling-video-bot",
-  "version": "2.0.7",
+  "version": "2.1.0",
   "name": "视频解析Bot",
   "description": "自动解析抖音和 B站分享链接，发送原视频并结合视觉识别生成人设风格点评。",
   "author": {
@@ -52,7 +52,9 @@
   ],
   "plugin_type": "media",
   "capabilities": [
-    "config.get"
+    "config.get",
+    "send.custom",
+    "send.text"
   ],
   "i18n": {
     "default_locale": "zh-CN",

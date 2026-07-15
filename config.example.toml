@@ -1,6 +1,6 @@
 [plugin]
 name = "ling_video-bot"
-config_version = "2.0.7"
+config_version = "2.1.0"
 enabled = true
 
 [parser]
@@ -12,6 +12,8 @@ max_video_size_mb = 80
 max_image_count = 9
 # 留空时从 PATH 查找 FFmpeg。
 ffmpeg_path = ""
+# 下载、解析和大型视频发送的总超时时间（秒）。
+operation_timeout = 300
 
 [cache]
 # 缓存超过保留时间或容量上限时自动删除最旧文件。
@@ -23,13 +25,6 @@ cleanup_interval_minutes = 30
 bilibili = ""
 # 抖音出现验证页或下载失败时，从浏览器开发者工具复制 www.douyin.com 请求的完整 Cookie。
 douyin = ""
-
-[api]
-# NapCat/OneBot HTTP API。大型视频通过本地 file URI 发送，避免 Base64 占用大量内存。
-host = "127.0.0.1"
-port = 3010
-token = ""
-timeout = 300
 
 [volcengine]
 enabled = false

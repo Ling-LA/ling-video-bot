@@ -8,8 +8,12 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any, Coroutine, Literal
 from urllib.parse import urljoin, urlparse
-from urllib.request import pathname2url
 
+from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugin, PluginConfigBase
+from maibot_sdk.types import HookMode, HookOrder
+
+import aiofiles
+import aiohttp
 import asyncio
 import base64
 import hashlib
@@ -19,12 +23,6 @@ import os
 import re
 import shutil
 import time
-
-from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugin, PluginConfigBase
-from maibot_sdk.types import HookMode, HookOrder
-
-import aiofiles
-import aiohttp
 
 logger = logging.getLogger("plugin.ling_video-bot")
 
@@ -41,7 +39,7 @@ ContentType = Literal["video", "image", "text"]
 
 class PluginSectionConfig(PluginConfigBase):
     name: str = Field(default="ling_video-bot")
-    config_version: str = Field(default="2.0.7")
+    config_version: str = Field(default="2.1.0")
     enabled: bool = Field(default=True)
 
 
@@ -53,6 +51,7 @@ class ParserSectionConfig(PluginConfigBase):
     max_video_size_mb: int = Field(default=80, ge=1, le=300)
     max_image_count: int = Field(default=9, ge=1, le=18)
     ffmpeg_path: str = Field(default="")
+    operation_timeout: int = Field(default=300, ge=10, le=600)
 
 
 class CacheSectionConfig(PluginConfigBase):
@@ -64,13 +63,6 @@ class CacheSectionConfig(PluginConfigBase):
 class CookiesSectionConfig(PluginConfigBase):
     bilibili: str = Field(default="")
     douyin: str = Field(default="")
-
-
-class ApiSectionConfig(PluginConfigBase):
-    host: str = Field(default="127.0.0.1")
-    port: int = Field(default=3010, ge=1, le=65535)
-    token: str = Field(default="")
-    timeout: int = Field(default=300, ge=10, le=600)
 
 
 class VolcengineSectionConfig(PluginConfigBase):
@@ -87,12 +79,11 @@ class PluginConfig(PluginConfigBase):
     parser: ParserSectionConfig = Field(default_factory=ParserSectionConfig)
     cache: CacheSectionConfig = Field(default_factory=CacheSectionConfig)
     cookies: CookiesSectionConfig = Field(default_factory=CookiesSectionConfig)
-    api: ApiSectionConfig = Field(default_factory=ApiSectionConfig)
     volcengine: VolcengineSectionConfig = Field(default_factory=VolcengineSectionConfig)
 
 
 # ═══════════════════════════════════════════════════════
-# OneBot 消息发送
+# 文件下载
 # ═══════════════════════════════════════════════════════
 
 async def _download_to_file(
@@ -144,85 +135,6 @@ async def _download_to_file(
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
-
-
-async def _post_onebot(
-    session: aiohttp.ClientSession,
-    url: str,
-    payload: dict[str, Any],
-    api: ApiSectionConfig,
-    timeout: int = 120,
-) -> bool:
-    headers = {"Authorization": f"Bearer {api.token}"} if api.token else {}
-    try:
-        async with session.post(url, json=payload, headers=headers, timeout=timeout) as response:
-            response_text = await response.text()
-            if response.status != 200:
-                logger.error("OneBot 请求失败：HTTP %s，%s", response.status, response_text[:500])
-                return False
-            try:
-                response_data = json.loads(response_text)
-            except json.JSONDecodeError:
-                logger.error("OneBot 返回了非 JSON 响应：%s", response_text[:500])
-                return False
-            success = response_data.get("status") == "ok" or response_data.get("retcode") == 0
-            if not success:
-                logger.error("OneBot 返回失败：%s", response_text[:500])
-            return success
-    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-        logger.error("OneBot 请求异常：%s", exc)
-        return False
-
-
-def _file_uri(path: Path) -> str:
-    return "file:///" + pathname2url(str(path.resolve())).lstrip("/")
-
-
-async def _send_group_msg(
-    session: aiohttp.ClientSession,
-    group_id: str,
-    segments: list[dict[str, Any]],
-    api: ApiSectionConfig,
-    timeout: int = 120,
-) -> bool:
-    return await _post_onebot(
-        session,
-        f"http://{api.host}:{api.port}/send_group_msg",
-        {"group_id": group_id, "message": segments},
-        api, timeout=timeout,
-    )
-
-
-async def send_text_to_group(
-    session: aiohttp.ClientSession,
-    group_id: str,
-    text: str,
-    api: ApiSectionConfig,
-) -> bool:
-    return await _send_group_msg(
-        session,
-        group_id,
-        [{"type": "text", "data": {"text": text}}],
-        api,
-        timeout=30,
-    )
-
-
-async def send_video_to_group(
-    session: aiohttp.ClientSession,
-    group_id: str,
-    path: Path,
-    api: ApiSectionConfig,
-) -> bool:
-    return await _send_group_msg(
-        session,
-        group_id,
-        [{"type": "video", "data": {"file": _file_uri(path)}}],
-        api,
-        timeout=api.timeout,
-    )
-
-
 
 
 # ═══════════════════════════════════════════════════════
@@ -948,7 +860,7 @@ class VideoBotPlugin(MaiBotPlugin):
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=self.config.api.timeout)
+            timeout = aiohttp.ClientTimeout(total=self.config.parser.operation_timeout)
             connector = aiohttp.TCPConnector(limit=20, limit_per_host=8)
             self._session = aiohttp.ClientSession(timeout=timeout, connector=connector)
         return self._session
@@ -957,6 +869,31 @@ class VideoBotPlugin(MaiBotPlugin):
         if self._session is not None and not self._session.closed:
             await self._session.close()
         self._session = None
+
+    async def _send_text(self, stream_id: str, text: str) -> bool:
+        """通过 MaiBot 当前聊天流发送文本。"""
+
+        sent = await self.ctx.send.text(
+            text,
+            stream_id,
+            sync_to_maisaka_history=True,
+            maisaka_source_kind="plugin_video",
+        )
+        return bool(sent)
+
+    async def _send_video(self, stream_id: str, path: Path) -> bool:
+        """通过 MaiBot 自定义消息能力发送本地视频文件。"""
+
+        sent = await self.ctx.send.custom(
+            "video",
+            {"file": path.resolve().as_uri()},
+            stream_id,
+            processed_plain_text="[视频]",
+            sync_to_maisaka_history=True,
+            maisaka_source_kind="plugin_video",
+            timeout_ms=self.config.parser.operation_timeout * 1000,
+        )
+        return bool(sent)
 
     def _spawn_task(self, coroutine: Coroutine[Any, Any, None]) -> None:
         task = asyncio.create_task(coroutine)
@@ -1026,7 +963,7 @@ class VideoBotPlugin(MaiBotPlugin):
             return None
 
         message: dict = kwargs.get("message", {}) or {}
-        if not self._is_allowed_group(message):
+        if not self._is_allowed_chat(message):
             return None
 
         source = self._message_source(message)
@@ -1070,8 +1007,11 @@ class VideoBotPlugin(MaiBotPlugin):
 
         content_type = _classify_url(target_url, platform)
         media_key = self._media_key(target_url, platform)
-        session_id = self._get_group_id(message) or self._get_user_id(message) or "unknown"
-        if self._is_recent(session_id, media_key):
+        stream_id = self._get_stream_id(message)
+        if not stream_id:
+            logger.error("[VideoBot] 当前消息缺少聊天流 ID，无法发送解析结果")
+            return None
+        if self._is_recent(stream_id, media_key):
             logger.info("[VideoBot] %s 处于防抖期，忽略重复请求", media_key)
             return {"action": "abort"} if self.config.parser.block_ai_reply else None
 
@@ -1101,11 +1041,6 @@ class VideoBotPlugin(MaiBotPlugin):
 
         else:
             # 视频/图片：立刻阻断，后台处理下载→发送→分析→点评
-            group_id = self._get_group_id(message)
-            if not group_id:
-                logger.warning("[VideoBot] 链接来自非群聊消息，当前 OneBot 发送链路无法处理")
-                return None
-
             if media_key in self._active_media:
                 logger.info("[VideoBot] %s 正在处理中，忽略重复请求", media_key)
                 return {"action": "abort"}
@@ -1113,7 +1048,7 @@ class VideoBotPlugin(MaiBotPlugin):
             self._active_media.add(media_key)
             try:
                 self._spawn_task(
-                    self._process_media_async(group_id, platform, target_url, content_type, media_key)
+                    self._process_media_async(stream_id, platform, target_url, content_type, media_key)
                 )
             except BaseException:
                 self._active_media.discard(media_key)
@@ -1122,7 +1057,7 @@ class VideoBotPlugin(MaiBotPlugin):
 
     async def _process_media_async(
         self,
-        group_id: str,
+        stream_id: str,
         platform: str,
         url: str,
         content_type: ContentType,
@@ -1134,18 +1069,17 @@ class VideoBotPlugin(MaiBotPlugin):
             async with lock:
                 await self._maybe_cleanup_cache()
                 session = await self._get_session()
-                api = self.config.api
                 if content_type == "video":
                     logger.info("[VideoBot] 开始处理%s视频：%s", platform, url[:60])
                     local_path, content, author, extra = await self._download_and_send_video(
-                        group_id,
+                        stream_id,
                         platform,
                         url,
                     )
                     if local_path and content:
                         analysis = await self._analyze_video(Path(local_path), content, extra)
                         comment = await self._generate_comment(platform, author, content, extra, analysis)
-                        if comment and await send_text_to_group(session, group_id, comment, api):
+                        if comment and await self._send_text(stream_id, comment):
                             logger.info("[VideoBot] 点评已发送：%s...", comment[:50])
                 elif content_type == "image":
                     logger.info("[VideoBot] 开始处理%s图文：%s", platform, url[:60])
@@ -1181,7 +1115,7 @@ class VideoBotPlugin(MaiBotPlugin):
                             image_description,
                             image_analysis,
                         )
-                        if comment and await send_text_to_group(session, group_id, comment, api):
+                        if comment and await self._send_text(stream_id, comment):
                             logger.info("[VideoBot] 图文点评已发送：%s...", comment[:50])
         except asyncio.CancelledError:
             raise
@@ -1192,7 +1126,7 @@ class VideoBotPlugin(MaiBotPlugin):
             self._media_locks.pop(media_key, None)
             interval = self.config.parser.debounce_seconds
             if interval > 0:
-                self._recent[(group_id, media_key)] = time.time() + interval
+                self._recent[(stream_id, media_key)] = time.time() + interval
 
     async def _fetch_text(self, url: str, platform: str) -> tuple[str, str] | None:
         """获取链接中的纯文本内容。"""
@@ -1208,7 +1142,7 @@ class VideoBotPlugin(MaiBotPlugin):
 
     async def _download_and_send_video(
         self,
-        group_id: str,
+        stream_id: str,
         platform: str,
         url: str,
     ) -> tuple[str | None, str, str, str]:
@@ -1217,7 +1151,6 @@ class VideoBotPlugin(MaiBotPlugin):
         result = None
         video_path = None
         session = await self._get_session()
-        api = self.config.api
         # 单文件下载上限与缓存容量保持一致，避免旧版独立下载配置阻止视频进入压缩流程。
         max_download_bytes = self.config.cache.max_size_mb * 1024 * 1024
 
@@ -1240,7 +1173,7 @@ class VideoBotPlugin(MaiBotPlugin):
             )
 
         if not result:
-            await send_text_to_group(session, group_id, "视频下载失败了😢", api)
+            await self._send_text(stream_id, "视频下载失败了😢")
             return None, "", "", ""
 
         video_path = result[0]
@@ -1256,11 +1189,11 @@ class VideoBotPlugin(MaiBotPlugin):
             if compressed:
                 video_path = compressed
             else:
-                await send_text_to_group(session, group_id, "视频压缩失败，发不了😢", api)
+                await self._send_text(stream_id, "视频压缩失败，发不了😢")
                 return None, "", "", ""
 
         logger.info(f"[VideoBot] 发送视频 ({video_path.stat().st_size / 1024 / 1024:.1f}MB)")
-        if not await send_video_to_group(session, group_id, video_path, api):
+        if not await self._send_video(stream_id, video_path):
             logger.error("[VideoBot] 视频发送失败，跳过后续分析与点评")
             return None, "", "", ""
         return str(video_path), content, author, extra
@@ -1627,12 +1560,14 @@ class VideoBotPlugin(MaiBotPlugin):
                 result.append(url)
         return result
 
-    def _is_allowed_group(self, message: dict) -> bool:
+    def _is_allowed_chat(self, message: dict) -> bool:
+        """检查群白名单；私聊不受群聊名单限制。"""
+
         whitelist = [str(w).strip() for w in self.config.parser.group_whitelist if str(w).strip()]
         if not whitelist:
             return True
         group_id = self._get_group_id(message)
-        return bool(group_id and group_id in whitelist)
+        return group_id is None or group_id in whitelist
 
     def _is_recent(self, session_id: str, url: str) -> bool:
         interval = self.config.parser.debounce_seconds
@@ -1666,12 +1601,8 @@ class VideoBotPlugin(MaiBotPlugin):
         return None
 
     @staticmethod
-    def _get_user_id(message: dict) -> str | None:
-        msg_info = message.get("message_info", {})
-        if isinstance(msg_info, dict):
-            uid = (msg_info.get("user_info") or {}).get("user_id")
-            return str(uid) if uid else None
-        return None
+    def _get_stream_id(message: dict) -> str:
+        return str(message.get("session_id") or "").strip()
 
 
 def create_plugin() -> VideoBotPlugin:
